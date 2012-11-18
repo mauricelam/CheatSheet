@@ -1,6 +1,6 @@
 [
     {
-        "caption": "KeyMapManager",
-        "command": "keymap_manager"
+        "caption": "CheatSheet",
+        "command": "cheat_sheet"
     }
 ]

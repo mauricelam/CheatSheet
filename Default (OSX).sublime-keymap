@@ -1,6 +1,6 @@
 [
     {
-        "command": "keymap_manager",
+        "command": "cheat_sheet",
         "keys": [
             "ctrl+alt+k"
         ]
