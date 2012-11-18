@@ -4,9 +4,9 @@
         "children":
         [
             {
-                "caption": "Keymap Manager",
-                "id": "keymap-manager",
-                "command": "keymap_manager"
+                "caption": "Keyboard Cheat Sheet",
+                "id": "cheat-sheet",
+                "command": "cheat_sheet"
             }
         ]
     }
