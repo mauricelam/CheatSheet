@@ -3,7 +3,7 @@ import os
 import re
 import json
 
-settings = sublime.load_settings("KeymapManager.sublime-settings")
+settings = sublime.load_settings("CheatSheet.sublime-settings")
 
 
 def prettifySnake(string):
@@ -15,16 +15,52 @@ def dictString(dictionary):
         string = []
         for key, value in dictionary.iteritems():
             string.append(key + ': ' + dictString(value))
-        return '{' + ', '.join(string) + '}'
+        return u'{' + u', '.join(string) + u'}'
     elif isinstance(dictionary, list):
-        return '[' + ', '.join(map(lambda x: dictString(x), dictionary)) + ']'
+        return u'[' + u', '.join(map(lambda x: dictString(x), dictionary)) + u']'
     else:
-        return str(dictionary)
+        return unicode(dictionary).replace('\t', u'\u21e5')
+
+
+OPERATORS = {
+    'equal': '=',
+    'not_equal': u'\u2260',
+    'regex_match': 'matches',
+    'regex_contains': 'contains'
+}
+
+
+def stringify_context(context):
+    key = context.get('key') or ''
+    operator = context.get('operator')
+    operator = OPERATORS.get(operator)
+    operand = context.get('operand')
+    string = u'{key} {operator} {operand}'
+    if key.startswith('setting.'):
+        if operand is True:
+            key = key.replace('setting.', u'\u2611')
+            string = u'{key}'
+        elif operand is False:
+            key = key.replace('setting.', u'\u2612')
+            string = u'{key}'
+        else:
+            key = key.replace('setting.', u'\u2699')
+    if (operator == '=' and operand is True) or (operator is None and operand is None):
+        string = u'{key}'
+    elif operator is None:
+        string = u'{key} = {operand}'
+    elif key == 'preceding_text' and (operator == 'contains' or operator == 'matches') and operand.endswith('$'):
+        string = u'preceded by {operand}'
+    elif key == 'following_text' and (operator == 'contains' or operator == 'matches') and operand.startswith('^'):
+        string = u'followed by {operand}'
+    else:
+        operand = str(operand).replace('\t', '\\t').replace('\n', '\\n')
+    return string.format(key=key, operator=operator, operand=operand)
 
 
 def formatUnknownName(name, args):
     string = prettifySnake(name)
-    if args is not None:
+    if args is not None and len(args) > 0:
         string += ' - ' + dictString(args)
     return string
 
@@ -42,6 +78,7 @@ def getCommandDisplayName(name, args):
         elif cols == 1:
             description = '{rows} rows'
         return 'Set Layout - ' + description.format(rows=rows, cols=cols)
+    # normal case
     if name in COMMANDS:
         if isinstance(COMMANDS[name], str):
             return COMMANDS[name]
@@ -59,14 +96,20 @@ def getValueInDict(dictionary, args):
         if key not in dictionary:
             continue
         if isinstance(dictionary[key], str):
-            filenameext = os.path.basename(value)
-            filename = os.path.splitext(filenameext)[0]
-            return dictionary[key].format(value=value, pvalue=prettifySnake(value), filename=filename, filenameext=filenameext)
+            value = str(value)
+            filename = os.path.splitext(os.path.basename(value))[0]
+            return dictionary[key].format(value=value, pvalue=prettifySnake(value), filename=filename)
         elif value in dictionary[key]:
             if isinstance(dictionary[key][value], str):
                 return dictionary[key][value]
             else:
                 return getValueInDict(dictionary[key][value], args)
+        elif '@default' in dictionary[key] and isinstance(dictionary[key]['@default'], str):
+            value = str(value)
+            filename = os.path.splitext(os.path.basename(value))[0]
+            return dictionary[key]['@default'].format(value=value, pvalue=prettifySnake(value), filename=filename)
+    if '@default' in dictionary:
+        return getValueInDict(dictionary['@default'], args)
 
 
 KEYCHARS = {
@@ -151,6 +194,70 @@ COMMANDS = {
         'file': {
             '${packages}/User/Preferences.sublime-settings': 'User Preferences'
         }
+    },
+    'switch_file': {
+        'extensions': 'Switch header / implementation file'
+    },
+    'move_to': {
+        'to': 'Move to {value}'
+    },
+    'move_to_group': {
+        'group': 'Move to Group {value}'
+    },
+    'select_by_index': {
+        'index': 'Select by Index {value}'
+    },
+    'fold_by_level': {
+        'level': {
+            1: 'Fold all',
+            '@default': 'Fold level {value}'
+        }
+    },
+    'focus_group': {
+        'group': 'Focus group {value}'
+    },
+    'toggle_comment': {
+        'block': {
+            True: 'Toggle Block Comment',
+            False: 'Toggle Line Comment'
+        }
+    },
+    'select_lines': {
+        'forward': {
+            True: 'Select Line Below',
+            False: 'Select Line Above'
+        }
+    },
+    'scroll_lines': {
+        'amount': {
+            1.0: 'Scroll Up 1 Line',
+            -1.0: 'Scroll Down 1 Line',
+            '@default': 'Scroll {value} Lines'
+        }
+    },
+    'move': {
+        'extend': {
+            True: {
+                'forward': {
+                    True: {
+                        'by': 'Expand Selection by {pvalue}'
+                    },
+                    False: {
+                        'by': 'Expand Selection Backwards by {pvalue}'
+                    }
+                }
+            }
+        },
+        '@default': {
+           'forward': {
+                True: {
+                    'by': 'Move Forward by {pvalue}'
+                },
+                False: {
+                    'by': 'Move Backwards by {pvalue}'
+                }
+            }
+        }
     }
 }
 
@@ -216,18 +323,22 @@ class CheatSheetCommand(sublime_plugin.TextCommand):
                     keys = item["keys"]
                     if not isinstance(keys, list):
                         keys = [keys]
-                    for key in keys:
-                        if key not in self.plugins_keys:
-                            self.plugins_keys[key] = []
-                        if item["command"] not in self.plugins_keys[key]:
-                            self.plugins_keys[key].append(item["command"])
 
-                    if isinstance(keys, list):
-                        keys = prettifyKeys(keys)
+                    if settings.get('ignore_single_key') and len(keys) == 1 and '+' not in keys[0]:
+                        continue
+                    keys = prettifyKeys(keys)
                     command = item["command"]
-                    item["name"] = name
+                    item['name'] = name
                     cmd = item.get('description') or getCommandDisplayName(command, item.get('args'))
-                    title = u'{0} - {1}'.format(name, keys)
+                    title = u'{keys} - {name}'.format(name=name, keys=keys)
+                    # show all the context
+                    if settings.get('show_context') and 'context' in item:
+                        title += u' {context}'.format(context=dictString(map(stringify_context, item['context'])))
+                    # show the selector (syntax or scope)
+                    if 'context' in item: 
+                        for context in item['context']:
+                            if context.get('key') == 'selector':
+                                title += u' <{selector}>'.format(selector=context['operand'])
                     plugins.append([cmd, title])
                     self.plugins.append(item)
                     i += 1
@@ -236,9 +347,6 @@ class CheatSheetCommand(sublime_plugin.TextCommand):
             plugins.append([item['name'], item['command'] + " : " + ",".join(item['keys'])])
             self.plugins.append(item)
 
-        plugins.append(["KeymapConflict", "check plugins keymap conflict"])
-        self.plugins.append({"name": "KeymapConflict"})
-
         self.view.window().show_quick_panel(plugins, self.panel_done)
 
     #panel done
@@ -246,9 +354,6 @@ class CheatSheetCommand(sublime_plugin.TextCommand):
         if picked == -1:
             return
         item = self.plugins[picked]
-        if item["name"] == "KeymapConflict":
-            self.checkKeymapConflict()
-            return
         if self.checkContext(item) == False:
             return
         args = {}
@@ -262,25 +367,14 @@ class CheatSheetCommand(sublime_plugin.TextCommand):
     #check context condition
     def checkContext(self, plugin):
         return True
-        if "context" not in plugin:
+        if 'context' not in plugin:
             return True
-        if "window" in plugin and plugin["window"]:
+        if 'window' in plugin and plugin['window']:
             return True
         # context = plugin["context"]
         # name = plugin["name"]
         # path = path = sublime.packages_path() + '/' + name + '/'
         import glob
-        pyFiles = glob.glob("*.py")
+        pyFiles = glob.glob('*.py')
         sublime.status_message(",".join(pyFiles))
         return True
-
-    def checkKeymapConflict(self):
-        keymapConflict = []
-        for key, item in self.plugins_keys.items():
-            if len(item) > 1:
-                keymapConflict.append([key, "Conflict in \"" + ", ".join(item) + "\" commands"])
-        if len(keymapConflict) > 0:
-            self.view.window().show_quick_panel(keymapConflict, self.check_panel_done)
-
-    def check_panel_done(self, picked):
-        pass

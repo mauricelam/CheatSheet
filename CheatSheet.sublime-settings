@@ -1,4 +1,6 @@
 {
-	"ignored_packages": ["CSS", "Vintage", "User", "Default", "KeymapManager"],
-	"single_max_nums": -1
+	"ignored_packages": ["CSS", "Vintage", "KeymapManager"],
+	"single_max_nums": -1,
+	"show_context": false,
+	"ignore_single_key": true
 }
